@@ -1,0 +1,50 @@
+# Dataset
+dataset/raw/
+dataset/processed/
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Secrets
+.env
+.env.*
+*.pfx
+*.pem
+*.key
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Contexto de IA
+AGENTS.md
+CLAUDE.md
+.claude/
+.cursor/
+.cursorrules
+.aider*
+.github/copilot-instructions.md
+.gemini/
+GEMINI.md
+
+# Contexto de IA (diretório)
+contextos/

@@ -1,0 +1,238 @@
+// Consultas RQL para a apresentação (banco: Movies, coleção: Movies)
+// Como usar: no Studio (http://localhost:8080), abra Queries > Query, cole UMA consulta
+// por vez e clique em Run. Os comentários "//" e "/* */" podem ser colados junto.
+// Todas validadas em 2026-11-24 (RavenDB 7.2.8, 4.803 documentos).
+// A 12 só funciona depois de criar o índice Movies/GenreStats (instruções na própria consulta).
+//
+// Ensaiar e voltar ao estado inicial:
+//   just reset   (ou: venv/bin/python scripts/reset_ravendb.py)
+// Apaga o banco Movies e reimporta os 4.803 filmes (~3 s). Tudo o que foi criado,
+// alterado ou excluído, inclusive os índices, é descartado. Rode antes de apresentar.
+//
+// Partes: 1–5 consultas, 6 CRUD (consultas 13–18).
+// Na parte 5, rode a 2 e logo depois a 11 para ver o auto-índice sendo substituído
+// (a 3 também altera esse índice, então não a rode entre as duas).
+
+
+// ============================================================
+// PARTE 1 — RQL básico
+// ============================================================
+
+// 1. Buscar um documento pelo ID (Avatar)
+from Movies where id() = 'movies/19995'
+
+
+// 2. Filtro + ordenação + paginação: top 10 filmes mais bem avaliados
+//    (com pelo menos 1000 votos). Mude para "limit 10, 10" para ver a página 2.
+from Movies
+where vote_count >= 1000
+order by vote_average as double desc
+limit 0, 10
+
+
+// 3. Operadores "in" e "between" + projeção (só os campos que interessam)
+//    Os dois limites do between precisam ser do mesmo tipo: 7.0 (e não 7), pois 8.5 é decimal.
+from Movies
+where original_language in ('pt', 'es') and vote_average between 7.0 and 8.5
+select title, original_language, vote_average
+limit 0, 10
+
+
+// ============================================================
+// PARTE 2 — Dados aninhados (vantagem do modelo de documentos)
+// ============================================================
+
+// 4. Filtrar por item dentro de um array: filmes que são Ação E Comédia
+from Movies
+where genres[].name all in ('Action', 'Comedy')
+order by popularity as double desc
+limit 0, 10
+
+
+// 5. Filtrar por ator dentro do elenco
+from Movies
+where cast[].name = 'Tom Hanks'
+select title, release_date, vote_average
+limit 0, 10
+
+
+// 6. Projeção calculada: lucro e tamanho do elenco, calculados na consulta
+from Movies as m
+where m.budget > 0 and m.revenue > 0
+select { title: m.title, profit: m.revenue - m.budget, cast_size: m.cast.length }
+limit 0, 10
+
+
+// ============================================================
+// PARTE 3 — Busca de texto
+// ============================================================
+
+// 7. Frase exata no resumo (overview)
+from Movies where search(overview, '"time travel"')
+select title, overview
+limit 0, 10
+
+
+// 8. Busca de texto + filtro, ordenada por relevância
+from Movies
+where search(overview, 'robot') and vote_average >= 7
+order by score()
+select title, vote_average
+limit 0, 10
+
+
+// ============================================================
+// PARTE 4 — Agregação
+// ============================================================
+
+// 9. Quantidade de filmes e receita total por idioma original
+from Movies
+group by original_language
+order by count() as long desc
+select key() as language, count(), sum(revenue) as total_revenue
+limit 0, 10
+
+
+// 10. Quantidade de filmes por gênero (agrupa pelos itens do array)
+from Movies
+group by genres[].name
+order by count() as long desc
+select genres[].name as genre, count()
+
+
+// ============================================================
+// PARTE 5 — Índices (o diferencial do RavenDB)
+// ============================================================
+
+// 11. Auto-índice: rode a consulta 2 e depois abra Indexes no menu lateral.
+//     Aparece um índice "Auto/Movies/By..." criado sozinho pelo RavenDB.
+//     Agora rode a consulta abaixo (um campo a mais no where) e volte em Indexes:
+//     o auto-índice anterior é substituído por um que cobre os dois campos.
+from Movies
+where vote_count >= 1000 and original_language = 'en'
+order by vote_average as double desc
+limit 0, 10
+
+
+// 12. Índice Map-Reduce estático: estatísticas por gênero, calculadas na indexação.
+//     Studio > Indexes > New index. Nome: Movies/GenreStats
+//     Cole o Map e o Reduce abaixo (Add reduce), salve e depois rode a consulta.
+//
+//     --- Map ---
+//     from m in docs.Movies
+//     from g in m.genres
+//     select new { genre = g.name, count = 1, revenue = m.revenue, votes = m.vote_average }
+//
+//     --- Reduce ---
+//     from r in results
+//     group r by r.genre into g
+//     select new {
+//         genre = g.Key,
+//         count = g.Sum(x => x.count),
+//         revenue = g.Sum(x => x.revenue),
+//         votes = g.Sum(x => x.votes)
+//     }
+//
+//     --- Consulta (média de nota = votes / count, calculada na projeção) ---
+from index 'Movies/GenreStats'
+order by count as long desc
+select genre, count, revenue
+
+
+// ============================================================
+// PARTE 6 — CRUD no Studio
+// ============================================================
+// Usa um filme fictício, movies/900001. Rode na ordem.
+// Complemento em Python (mesmas operações via API HTTP):
+//   just crud   (ou: venv/bin/python scripts/crud_ravendb.py)
+
+
+// 13. CREATE — inserir um documento
+//     Studio: Documents > New document.
+//     No campo ID, digite: movies/900001
+//     Cole o JSON abaixo (sem o "/*" e o "*/") e clique em Save:
+/*
+{
+    "tmdb_id": 900001,
+    "title": "Filme de Teste CRUD",
+    "original_language": "pt",
+    "overview": "Documento criado ao vivo para demonstrar o CRUD no RavenDB.",
+    "status": "Planned",
+    "budget": 0,
+    "revenue": 0,
+    "vote_average": 0.0,
+    "vote_count": 0,
+    "genres": [ { "id": 18, "name": "Drama" } ],
+    "cast": [],
+    "crew": [],
+    "@metadata": { "@collection": "Movies" }
+}
+*/
+//     O "@metadata" com "@collection": "Movies" coloca o documento na coleção Movies.
+//     Diferente de um banco relacional, não há tabela nem esquema: um documento novo
+//     pode ter menos campos que os outros (este não tem keywords, homepage etc.).
+
+
+// 14. READ — ler o documento criado (por ID e por filtro)
+from Movies where id() = 'movies/900001'
+
+from Movies where title = 'Filme de Teste CRUD'
+select title, status, vote_average, genres
+
+
+// 15. UPDATE — alterar alguns campos do documento (patch)
+//     Rode em Queries > Query (ou em Documents > Patch).
+//     Só os campos citados mudam; os demais continuam iguais.
+//     O array de gêneros recebe um item novo, sem reescrever o documento inteiro.
+from Movies
+where id() = 'movies/900001'
+update {
+    this.status = 'Released';
+    this.vote_average = 8.5;
+    this.genres.push({ id: 35, name: 'Comedy' });
+}
+
+//     Confira a alteração rodando a 14 de novo.
+
+
+// 16. UPDATE em massa — alterar vários documentos de uma vez
+//     Acrescenta um campo novo só nos filmes em português (9 filmes).
+from Movies
+where original_language = 'pt'
+update {
+    this.language_name = 'Portuguese';
+}
+
+//     Conferindo:
+from Movies
+where language_name = 'Portuguese'
+select title, original_language, language_name
+
+
+// 17. DELETE — excluir o documento
+//     O RQL não tem comando "delete". No Studio:
+//       Documents > Movies > abra movies/900001 > botão Delete (ou, na lista
+//       de documentos, marque a caixa ao lado dele e clique em Delete).
+//     Confira: a consulta abaixo deve voltar sem resultados.
+from Movies where id() = 'movies/900001'
+
+
+// 18. Alternativa: CREATE com RQL (sem usar a tela de New document)
+//     O put() cria um documento dentro de um script de update. O where precisa
+//     encontrar algum documento (aqui, o Avatar) só para o script rodar uma vez;
+//     o Avatar não é alterado.
+from Movies
+where id() = 'movies/19995'
+update {
+    put('movies/900001', {
+        tmdb_id: 900001,
+        title: 'Filme de Teste CRUD',
+        status: 'Planned',
+        vote_average: 0.0,
+        genres: [ { id: 18, name: 'Drama' } ],
+        '@metadata': { '@collection': 'Movies' }
+    });
+}
+
+
+// Ao final da demonstração: volte ao estado inicial com "just reset".

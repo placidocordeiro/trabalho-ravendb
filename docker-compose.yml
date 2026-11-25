@@ -1,0 +1,16 @@
+services:
+  ravendb:
+    image: ravendb/ravendb:latest
+    container_name: ravendb
+    ports:
+      - "8080:8080"
+    environment:
+      - RAVEN_Setup_Mode=None
+      - RAVEN_License_Env_New=true
+      - RAVEN_DataDir=/var/lib/ravendb/data
+    volumes:
+      - ravendb_data:/var/lib/ravendb/data
+    restart: unless-stopped
+
+volumes:
+  ravendb_data:
